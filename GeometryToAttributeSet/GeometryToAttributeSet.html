@@ -1,0 +1,236 @@
+﻿<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+        <meta http-equiv="X-UA-Compatible" content="IE=7,IE=9" />
+        <!--The viewport meta tag is used to improve the presentation and behavior of the samples
+        on iOS devices-->
+        <meta name="viewport" content="initial-scale=1, maximum-scale=1,user-scalable=no"/>
+        <title>Query Attribute Set</title>
+        <link rel="stylesheet" type="text/css" href="http://serverapi.arcgisonline.com/jsapi/arcgis/2.6/js/dojo/dijit/themes/claro/claro.css"/>
+        <style type="text/css">
+            html, body {
+                height: 98%;
+                width: 98%;
+                margin: 0;
+                padding: 5px;
+                font-family: Arial, Helvetica, sans-serif;
+            }
+            
+            #rightPane {
+                width: 20%;
+            }
+            
+            .sectionTitle {
+                color: #888888;
+                font-size: 1.2em;
+                margin-bottom: 15px;
+            }
+        </style>
+        <script type="text/javascript">
+            var djConfig = {
+                parseOnLoad: true
+            };
+        </script>
+        <script type="text/javascript" src="http://serverapi.arcgisonline.com/jsapi/arcgis/?v=2.7"></script>
+        <script type="text/javascript">
+            dojo.require("dijit.layout.BorderContainer");
+            dojo.require("dijit.layout.ContentPane");
+            dojo.require("dijit.layout.ContentPane");
+            dojo.require("esri.map");
+            dojo.require("esri.dijit.Legend");
+            dojo.require("esri.arcgis.utils");
+            dojo.require("esri.tasks.query");
+            dojo.require("esri.tasks.geometry");
+            dojo.require("esri.graphic");
+            
+            var map;
+            //Configure these variables for your data
+            var mapServiceURL = "http://roadsandhighwayssample.esri.com/arcgis/rest/services/RoadsHighways/NewYorkRoads/MapServer";
+            var visibleLayers = [3];
+            var networkLayerURL = "http://roadsandhighwayssample.esri.com/arcgis/rest/services/RoadsHighways/NewYorkRoads/MapServer/exts/LRSServer/networkLayers/16";
+            var attributeSet = [{ "layerId": 3, "fields": ["functional_class"] }, { "layerId": 5, "fields": ["median_type"] }, { "layerId": 6, "fields": ["median_width"] }, { "layerId": 12, "fields": ["through_lane"] }, { "layerId": 11, "fields": ["terrain_type"] }, { "layerId": 10, "fields": ["speed_limit"] }, { "layerId": 7, "fields": ["pvt_type", "pvt_width", "total_lane", "iri"] }];
+            //End of configuration
+            var geomToMeasureURL = networkLayerURL + "/geometryToMeasure";
+            var queryAttrSetURL = networkLayerURL + "/queryAttributeSet";
+
+            function init() {
+                dojo.byId("divHelp").innerHTML = "Click on a route to get attributes from " + attributeSet.length + " event layers.";
+                var initialExtent = new esri.geometry.Extent({
+                    "xmin": -8241602.81762082,
+                    "ymin": 4972629.538129259,
+                    "xmax": -8204989.48107227,
+                    "ymax": 4985031.445968512,
+                    "spatialReference": {
+                        "wkid": 102100
+                    }
+                });
+                map = new esri.Map("map", {
+                    extent: initialExtent
+                });
+                
+                var routeLayer = new esri.layers.ArcGISDynamicMapServiceLayer(mapServiceURL);
+                var basemap = new esri.layers.ArcGISTiledMapServiceLayer("http://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer");
+                var basemapLabels = new esri.layers.ArcGISTiledMapServiceLayer("http://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer");
+                routeLayer.setVisibleLayers(visibleLayers);
+
+                var legendLayers = [];
+                legendLayers.push({
+                    title: "Networks",
+                    layer: routeLayer
+                });
+
+                // Initialize the legend
+                dojo.connect(map, 'onLayersAddResult', function (results) {
+                    var legend = new esri.dijit.Legend({
+                        map: map,
+                        layerInfos: legendLayers
+                    }, "legendDiv");
+                    legend.startup();
+                });
+                
+                map.infoWindow.resize(275, 125);
+                dojo.connect(map, 'onLoad', initFunctionality);
+                map.addLayers([basemap, routeLayer, basemapLabels]);
+            }
+            
+            function initFunctionality(map){
+                dojo.connect(dijit.byId('map'), 'resize', map, map.resize);
+                map.infoWindow.resize(250, 250);
+                
+
+                //identify proxy page to use if the toJson payload to the geometry service is greater than 2000 characters.
+                //If this null or not available the operation will not work.  Otherwise it will do a http post to the proxy.
+                esri.config.defaults.io.corsEnabledServers = ["http://roadsandhighwayssample.esri.com"];
+                esri.config.defaults.io.proxyUrl = "/proxy/proxy.ashx";
+                
+                // Listen for map onClick event
+                dojo.connect(map, "onClick", function (evt) {
+                    map.graphics.clear();
+                    map.infoWindow.hide();
+                    
+                    var point = new esri.geometry.Point(evt.mapPoint.x, evt.mapPoint.y);
+                    
+                    // Set up SOE URL and parameters
+                    
+                    
+                    var geometryLocation = {
+                        'geometry': {
+                            'x': evt.mapPoint.x,
+                            'y': evt.mapPoint.y
+                        }
+                    };
+                    var locations = [geometryLocation];
+                    var fivePixels = (map.extent.getWidth() / map.width) * 5;
+                    var content = {
+                        'locations': dojo.toJson(locations),
+                        'tolerance': fivePixels,
+                        'inSR': map.spatialReference.wkid,
+                        'f': "json"
+                    };
+                    
+                    // Run the SOE query
+                    esri.request({
+                        url: geomToMeasureURL,
+                        content: content,
+                        callbackParamName: "callback",
+                        handleAs: "json",
+                        load: function(response){
+                            showResponse(response, evt);
+                        },
+                        error: function(error){
+                            showError(error, evt);
+                        }
+                    });
+                });
+            }
+            
+            function showError(error, evt){
+                map.graphics.clear();
+
+                var title = "Error";
+                var content = error.message;
+
+                map.infoWindow.setTitle(title);
+                map.infoWindow.setContent(content);
+                if (evt) {
+                    map.infoWindow.show(evt.screenPoint, map.getInfoWindowAnchor(evt.screenPoint));
+                }
+            }
+            
+            function showResponse(response, evt){
+                map.graphics.clear();
+                
+                // Parse the response
+                var measureUnit = response.unitsOfMeasure;
+                var locations = response.locations;
+                var title = "Route Attributes";
+                var content = "Unit of Measure: " + measureUnit;
+                // Loop through all point items in the response
+                var i = 0;
+                var locationList = [];
+                while (response.locations[i]) {
+                    var results = response.locations[i].results;
+                    //Build a locations list using RouteID and Measure
+                    //The Query Attribute set function is looking for properties named routeId and measure.
+                    for (var j = 0; j < results.length; j++) {
+                        locationList.push({ "routeId": results[j].routeId, "measure": results[j].measure });
+                    }
+                    i++;
+                }
+                //Build the arguments for the Query Attribute Set function
+                //documentation available at http://roadsandhighwayssample.esri.com/roads/api/index.html 
+                var args = {
+                    'locations': dojo.toJson(locationList),
+                    'attributeSet': dojo.toJson(attributeSet),
+                    'outSR': map.spatialReference.wkid,
+                    'f': "json"
+                };
+                //Send the request for the attribute set
+                esri.request({
+                    url: queryAttrSetURL,
+                    content: args,
+                    callbackParamName: "callback",
+                    handleAs: "json",
+                    load: function (response2) {
+                        //Build HTML from the response
+                        dojo.forEach(response2.features, function (feature){
+                            content += "<HR/>";
+                            for(var i in feature.attributes){
+                                content += i + ": " + feature.attributes[i] + "<BR/>";
+                            };
+                        });
+                        //Set the properties of the info window
+                        map.infoWindow.setTitle(title);
+                        map.infoWindow.setContent(content);
+                        if (evt) {
+                            //Display the info window
+                            map.infoWindow.show(evt.screenPoint, map.getInfoWindowAnchor(evt.screenPoint));
+                        }
+                    },
+                    error: function (error) {
+                        showError(error, evt);
+                    }
+                });
+            }
+            
+            dojo.addOnLoad(init);
+        </script>
+    </head>
+    <body class="claro">
+        <div id="content" dojotype="dijit.layout.BorderContainer" design="headline" gutters="true" style="width: 100%; height: 100%; margin: 0;">
+            <div id="rightPane" dojotype="dijit.layout.ContentPane" region="right" style="overflow:auto;">
+                <div dojoType="dijit.layout.ContentPane">
+                    <div class="sectionTitle">Query attribute set</div>
+                    <div id="divHelp"></div>
+                </div>
+                <hr size="1"/>
+                <div dojoType="dijit.layout.ContentPane">
+                    <div class="sectionTitle">Legend</div>
+                    <div id="legendDiv"></div>
+                </div>
+            </div>
+            <div id="map" data-dojo-type="dijit.layout.ContentPane" data-dojo-props="region:'center'"></div>
+        </div>
+    </body>
+</html>
